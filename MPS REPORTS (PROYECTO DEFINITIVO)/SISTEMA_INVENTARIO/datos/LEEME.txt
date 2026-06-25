@@ -1,0 +1,1 @@
+Aqui se guardara la base de datos propia del sistema (sistema.db). Se creara en la Fase 1.

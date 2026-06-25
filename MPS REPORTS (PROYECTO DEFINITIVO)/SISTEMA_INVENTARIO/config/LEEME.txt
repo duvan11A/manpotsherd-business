@@ -1,0 +1,1 @@
+Carpeta de configuracion. Contiene config.json con las rutas de Business por empresa.

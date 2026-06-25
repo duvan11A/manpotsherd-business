@@ -1,0 +1,1 @@
+Aqui se guardaran automaticamente las copias de seguridad de la base propia, cada 3 dias. No borre esta carpeta.

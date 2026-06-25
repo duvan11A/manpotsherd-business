@@ -1,0 +1,20 @@
+{
+  "_comentario": "Configuracion de MPS REPORTS. Cada empresa es un Business distinto. Para integrar JAIME DUQUE en el futuro, escriba sus rutas y cambie su estado a ACTIVA.",
+  "empresas": {
+    "FUTURE COMPANY": {
+      "estado": "ACTIVA",
+      "rutas": [
+        "\\\\SERVER\\f\\Busines.fut",
+        "Z:\\Busines.fut",
+        "C:\\Busines.fut"
+      ],
+      "subcarpeta_datos": "FUTURE\\datos"
+    },
+    "JAIME DUQUE": {
+      "estado": "EN PROCESO DE DESARROLLO",
+      "rutas": [],
+      "subcarpeta_datos": ""
+    }
+  },
+  "ano_activo": 2026
+}

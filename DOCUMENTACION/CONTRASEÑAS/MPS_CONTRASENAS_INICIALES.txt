@@ -1,0 +1,54 @@
+================================================================
+   MPS REPORTS - CONTRASENAS INICIALES
+   CONFIDENCIAL - GUARDAR FUERA DE LA CARPETA DEL PROYECTO
+================================================================
+
+   Empresa: FUTURE COMPANY S.A.S.
+   Sistema: MPS REPORTS
+   Desarrollado por: MANPOTSHERD - Ingeniero Duvan Lopez
+
+
+   USUARIOS Y CONTRASENAS INICIALES
+   --------------------------------------------------------------
+
+   Usuario:     INGENIERO DUVAN
+   Rol:         ADMINISTRADOR (acceso total)
+   Contrasena:  Duvan#Admin2026
+
+   --------------------------------------------------------------
+
+   Usuario:     GERENCIA
+   Rol:         SUPERVISOR
+   Contrasena:  Gerencia#Fut2026
+
+   --------------------------------------------------------------
+
+   Usuario:     BODEGA
+   Rol:         SUPERVISOR
+   Contrasena:  Bodega#Fut2026
+
+   --------------------------------------------------------------
+
+   Usuario:     VENTAS
+   Rol:         CONSULTA (solo lectura)
+   Contrasena:  Ventas#Fut2026
+
+   --------------------------------------------------------------
+
+
+   NOTAS IMPORTANTES
+   --------------------------------------------------------------
+   1. Estas son contrasenas INICIALES. En la entrega del sistema
+      (Fase 10) cada persona debe cambiar la suya por una propia.
+
+   2. NO guarde este archivo dentro de la carpeta del proyecto.
+      Guardelo en un lugar privado y seguro.
+
+   3. En la base de datos del sistema las contrasenas quedan
+      cifradas (hash SHA-256 con salt). Este archivo es la unica
+      copia legible: protejala.
+
+   4. El usuario INGENIERO DUVAN es el unico que puede crear
+      nuevos usuarios y administrar el sistema.
+
+================================================================

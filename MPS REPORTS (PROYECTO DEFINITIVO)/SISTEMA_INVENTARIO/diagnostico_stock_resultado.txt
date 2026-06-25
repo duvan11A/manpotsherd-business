@@ -1,0 +1,27 @@
+MPS REPORTS - DIAGNOSTICO DE STOCK REAL  (SOLO LECTURA)
+Productos de control: FT5043234-TM, FT4319227-TS, MW3220276-T8, FT4870132-TXL, FT4996263-T10
+
+Archivos movite encontrados: movite18.dbf, movite19.dbf, movite20.dbf, MOVITE21.DBF, movite22.dbf, movite23.dbf, movite24.dbf, movite25.dbf, movite26.dbf, moviteRM.dbf
+
+STOCK TOTAL POR PRODUCTO:
+   CODIGO                solo 2026   todos los anos
+   FT5043234-TM                 -8               -8
+   FT4319227-TS                 -1              -16
+   MW3220276-T8                 -2              -43
+   FT4870132-TXL                -1               -1
+   FT4996263-T10                -1               -1
+
+   (si 'todos los anos' da positivo y coherente, esa es la fuente)
+
+CAMPOS DE items.dbf QUE PARECEN EXISTENCIA:
+   CANT_COM, CANT_VTA, DECI_CANT, SOLOCANT, INVIMA, DISP_MOVIL, SI_CANT2, VAL_INV
+
+VALORES DE ESOS CAMPOS PARA LOS PRODUCTOS DE CONTROL:
+   MW3220276-T8     {'CANT_COM': 0.0, 'CANT_VTA': 0.0, 'DECI_CANT': 0, 'SOLOCANT': 0, 'INVIMA': '', 'DISP_MOVIL': 0, 'SI_CANT2': 0, 'VAL_INV': 0}
+   FT4319227-TS     {'CANT_COM': 0.0, 'CANT_VTA': 0.0, 'DECI_CANT': 0, 'SOLOCANT': 0, 'INVIMA': '', 'DISP_MOVIL': 0, 'SI_CANT2': 0, 'VAL_INV': 0}
+   FT4996263-T10    {'CANT_COM': 0.0, 'CANT_VTA': 0.0, 'DECI_CANT': 0, 'SOLOCANT': 0, 'INVIMA': '', 'DISP_MOVIL': 0, 'SI_CANT2': 0, 'VAL_INV': 0}
+   FT4870132-TXL    {'CANT_COM': 0.0, 'CANT_VTA': 0.0, 'DECI_CANT': 0, 'SOLOCANT': 0, 'INVIMA': '', 'DISP_MOVIL': 0, 'SI_CANT2': 0, 'VAL_INV': 0}
+   FT5043234-TM     {'CANT_COM': 0.0, 'CANT_VTA': 0.0, 'DECI_CANT': 0, 'SOLOCANT': 0, 'INVIMA': '', 'DISP_MOVIL': 0, 'SI_CANT2': 0, 'VAL_INV': 0}
+
+OTROS ARCHIVOS .dbf QUE PARECEN DE SALDOS/EXISTENCIAS:
+   (ninguno)
