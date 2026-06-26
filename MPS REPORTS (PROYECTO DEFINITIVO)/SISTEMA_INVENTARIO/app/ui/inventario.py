@@ -1,15 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MPS REPORTS - Modulo Inventario (Fase 4)
-Cuatro tarjetas KPI, tabla completa con clasificaciones (marca, linea,
-sublinea/tipo), busqueda en vivo, filtro de bodega, casilla 'solo con
-stock', ordenamiento por columna y refresco manual.
-
-Los datos viven en inventario_store (almacen compartido en memoria) y se
-precargan desde el login. Esta pantalla solo se "asoma" al almacen, asi
-cambiar de pestana y volver es instantaneo. Mientras carga, el porcentaje
-se muestra arriba a la derecha (indicador) y, la primera vez, tambien en
-una tarjeta de progreso centrada.
+MPS REPORTS - Modulo Inventario (Fase 4 + vista por marca)
+Vista inicial: resumen por marca (productos, unidades, valor, rentabilidad,
+rotacion). Doble clic en una marca -> filtra la tabla de productos por esa
+marca. Boton 'Ver todas las marcas' para volver al resumen.
 """
 
 import tkinter as tk
@@ -21,23 +15,33 @@ import ventas_datos as VD
 import rentabilidad_datos as RD
 from inventario_store import store
 
-# Columnas de la tabla: (id, titulo, ancho, alineacion)
+# Columnas de la tabla de productos
 COLUMNAS = [
-    ("codigo", "Codigo", 95, "w"),
-    ("referencia", "Referencia", 100, "w"),
-    ("nombre", "Nombre", 220, "w"),
-    ("talla", "Talla", 55, "center"),
-    ("color", "Color", 60, "center"),
-    ("bodega", "Bodega", 150, "w"),
-    ("stock", "Stock", 70, "e"),
-    ("costo_unit", "Costo Unit", 100, "e"),
-    ("precio_pub", "Precio Publico", 110, "e"),
-    ("valor_bodega", "Valor Bodega", 120, "e"),
-    ("rent_pct", "Rentabilidad %", 110, "e"),
-    ("rotacion", "Rotacion", 80, "e"),
-    ("marca", "Marca", 205, "w"),
-    ("linea", "Linea", 180, "w"),
-    ("tipo", "Sublinea", 160, "w"),
+    ("codigo",      "Codigo",           95,  "w"),
+    ("referencia",  "Referencia",       100, "w"),
+    ("nombre",      "Nombre",           220, "w"),
+    ("talla",       "Talla",            55,  "center"),
+    ("color",       "Color",            60,  "center"),
+    ("bodega",      "Bodega",           150, "w"),
+    ("stock",       "Stock",            70,  "e"),
+    ("costo_unit",  "Costo Unit",       100, "e"),
+    ("precio_pub",  "Precio Publico",   110, "e"),
+    ("valor_bodega","Valor Bodega",     120, "e"),
+    ("rent_pct",    "Rentabilidad %",   110, "e"),
+    ("rotacion",    "Rotacion",         80,  "e"),
+    ("marca",       "Marca",            205, "w"),
+    ("linea",       "Linea",            180, "w"),
+    ("tipo",        "Sublinea",         160, "w"),
+]
+
+# Columnas del resumen por marca
+COLS_MARCA = [
+    ("marca",       "Marca",                200, "w"),
+    ("productos",   "Productos",             90, "e"),
+    ("unidades",    "Unidades",              90, "e"),
+    ("valor",       "Valor bodega",         130, "e"),
+    ("rent_prom",   "Rentabilidad %",       120, "e"),
+    ("rotacion",    "Rotacion prom",        110, "e"),
 ]
 
 
@@ -52,6 +56,39 @@ def _money(v):
     return "$ " + _miles(v)
 
 
+def _resumen_marcas(filas):
+    """Agrupa las filas por marca y calcula el resumen."""
+    marcas = {}
+    for f in filas:
+        if f["stock"] <= 0:
+            continue
+        m = f["marca"] or "(Sin marca)"
+        if m not in marcas:
+            marcas[m] = {"productos": set(), "unidades": 0.0,
+                         "valor": 0.0, "rents": [], "rots": []}
+        marcas[m]["productos"].add(f["codigo"])
+        marcas[m]["unidades"] += f["stock"]
+        marcas[m]["valor"]    += f["valor_bodega"]
+        if f["rent_pct"] is not None:
+            marcas[m]["rents"].append(f["rent_pct"])
+        if f["rotacion"] is not None:
+            marcas[m]["rots"].append(f["rotacion"])
+
+    res = []
+    for m, d in sorted(marcas.items()):
+        rent = (sum(d["rents"]) / len(d["rents"])) if d["rents"] else None
+        rot  = (sum(d["rots"])  / len(d["rots"]))  if d["rots"]  else None
+        res.append({
+            "marca":     m,
+            "productos": len(d["productos"]),
+            "unidades":  d["unidades"],
+            "valor":     d["valor"],
+            "rent_prom": rent,
+            "rotacion":  rot,
+        })
+    return res
+
+
 class ModuloInventario:
     def __init__(self, parent, rol="CONSULTA", indicador_cb=None):
         self.parent = parent
@@ -64,6 +101,8 @@ class ModuloInventario:
         self.orden_col = None
         self.orden_asc = True
         self._vivo = True
+        self._vista = "marcas"          # "marcas" o "productos"
+        self._marca_activa = None       # None = todas
 
         self._construir()
 
@@ -77,24 +116,26 @@ class ModuloInventario:
             self._mostrar_overlay()
             pct, msg = store.ultimo_progreso
             self._actualizar_overlay(pct or 3, msg or "Cargando inventario...")
-            self._set_indicador("Cargando inventario... {}%".format(int(pct or 0)),
-                                True)
+            self._set_indicador(
+                "Cargando inventario... {}%".format(int(pct or 0)), True)
             store.precargar()
 
+    # ------------------------------------------------------------------
+    # CONSTRUCCION DE LA UI
     # ------------------------------------------------------------------
     def _construir(self):
         self.cont = tk.Frame(self.parent, bg=E.FONDO)
         self.cont.pack(fill="both", expand=True, padx=16, pady=14)
 
-        # ----- Tarjetas KPI -----
+        # KPIs
         fila_kpi = tk.Frame(self.cont, bg=E.FONDO)
         fila_kpi.pack(fill="x")
         self.kpi = {}
         defs = [
-            ("productos", "Productos", E.AZUL),
-            ("unidades", "Unidades en bodega", E.VERDE),
-            ("valor", "Valor inventario al costo", E.AZUL),
-            ("pocas", "Pocas unidades", E.ROJO),
+            ("productos", "Productos",               E.AZUL),
+            ("unidades",  "Unidades en bodega",      E.VERDE),
+            ("valor",     "Valor inventario al costo", E.AZUL),
+            ("pocas",     "Pocas unidades",           E.ROJO),
         ]
         for i, (clave, titulo, color) in enumerate(defs):
             self.kpi[clave] = self._tarjeta_kpi(fila_kpi, titulo, color)
@@ -102,59 +143,74 @@ class ModuloInventario:
                                           padx=(0 if i == 0 else 12, 0))
             fila_kpi.columnconfigure(i, weight=1)
 
-        # ----- Barra de filtros -----
-        barra = tk.Frame(self.cont, bg=E.FONDO)
-        barra.pack(fill="x", pady=(14, 8))
+        # Barra de navegacion (marca activa + boton volver)
+        self.barra_nav = tk.Frame(self.cont, bg=E.FONDO)
+        self.barra_nav.pack(fill="x", pady=(10, 0))
+        self.lbl_nav = tk.Label(
+            self.barra_nav, text="", bg=E.FONDO, fg=E.AZUL,
+            font=(E.FUENTE, 11, "bold"))
+        self.lbl_nav.pack(side="left")
+        self.btn_volver = tk.Button(
+            self.barra_nav, text="<  Ver todas las marcas",
+            bg=E.AZUL2, fg=E.TEXTO_BLANCO, font=E.F_NORMAL_B,
+            relief="flat", bd=0, cursor="hand2", padx=12, pady=4,
+            command=self._volver_marcas)
+        # No se empaca hasta que se entra al detalle de una marca
 
-        tk.Label(barra, text="Buscar:", bg=E.FONDO, fg=E.TEXTO_SUB,
-                 font=E.F_NORMAL).pack(side="left")
+        # Barra de filtros (solo visible en vista productos)
+        self.barra_filtros = tk.Frame(self.cont, bg=E.FONDO)
+
+        tk.Label(self.barra_filtros, text="Buscar:", bg=E.FONDO,
+                 fg=E.TEXTO_SUB, font=E.F_NORMAL).pack(side="left")
         self.var_busqueda = tk.StringVar()
-        ent = tk.Entry(barra, textvariable=self.var_busqueda, width=34,
-                       font=E.F_NORMAL, relief="solid", bd=1)
-        ent.pack(side="left", padx=(6, 16))
+        ent = tk.Entry(self.barra_filtros, textvariable=self.var_busqueda,
+                       width=28, font=E.F_NORMAL, relief="solid", bd=1)
+        ent.pack(side="left", padx=(6, 12))
         ent.bind("<KeyRelease>", lambda e: self._aplicar_filtros())
 
-        tk.Label(barra, text="Bodega:", bg=E.FONDO, fg=E.TEXTO_SUB,
-                 font=E.F_NORMAL).pack(side="left")
+        tk.Label(self.barra_filtros, text="Bodega:", bg=E.FONDO,
+                 fg=E.TEXTO_SUB, font=E.F_NORMAL).pack(side="left")
         self.var_bodega = tk.StringVar(value="Todas")
-        self.cmb_bodega = ttk.Combobox(barra, textvariable=self.var_bodega,
-                                       state="readonly", width=24,
-                                       font=E.F_NORMAL, values=["Todas"])
-        self.cmb_bodega.pack(side="left", padx=(6, 16))
+        self.cmb_bodega = ttk.Combobox(
+            self.barra_filtros, textvariable=self.var_bodega,
+            state="readonly", width=22, font=E.F_NORMAL, values=["Todas"])
+        self.cmb_bodega.pack(side="left", padx=(6, 12))
         self.cmb_bodega.bind("<<ComboboxSelected>>",
                              lambda e: self._aplicar_filtros())
 
         self.var_stock = tk.BooleanVar(value=True)
-        tk.Checkbutton(barra, text="Solo con stock", variable=self.var_stock,
-                       bg=E.FONDO, fg=E.TEXTO, font=E.F_NORMAL,
-                       activebackground=E.FONDO, selectcolor=E.BLANCO,
-                       command=self._aplicar_filtros).pack(side="left")
+        tk.Checkbutton(
+            self.barra_filtros, text="Solo con stock",
+            variable=self.var_stock, bg=E.FONDO, fg=E.TEXTO,
+            font=E.F_NORMAL, activebackground=E.FONDO,
+            selectcolor=E.BLANCO,
+            command=self._aplicar_filtros).pack(side="left")
 
-        tk.Label(barra, text="Rotacion:", bg=E.FONDO, fg=E.TEXTO_SUB,
-                 font=E.F_NORMAL).pack(side="left", padx=(16, 0))
+        tk.Label(self.barra_filtros, text="Rotacion:", bg=E.FONDO,
+                 fg=E.TEXTO_SUB, font=E.F_NORMAL).pack(side="left",
+                                                       padx=(12, 0))
         self.var_periodo = tk.StringVar(value="Ano actual")
         self.cmb_periodo = ttk.Combobox(
-            barra, textvariable=self.var_periodo, state="readonly", width=16,
-            font=E.F_NORMAL, values=VD.PERIODOS)
+            self.barra_filtros, textvariable=self.var_periodo,
+            state="readonly", width=14, font=E.F_NORMAL, values=VD.PERIODOS)
         self.cmb_periodo.pack(side="left", padx=(6, 0))
         self.cmb_periodo.bind("<<ComboboxSelected>>",
                               lambda e: self._cambiar_periodo())
 
         self.btn_refrescar = tk.Button(
-            barra, text="Actualizar ahora", bg=E.AZUL, fg=E.TEXTO_BLANCO,
-            font=E.F_NORMAL_B, relief="flat", bd=0, cursor="hand2",
-            activebackground=E.AZUL2, activeforeground=E.TEXTO_BLANCO,
+            self.barra_filtros, text="Actualizar ahora", bg=E.AZUL,
+            fg=E.TEXTO_BLANCO, font=E.F_NORMAL_B, relief="flat", bd=0,
+            cursor="hand2", activebackground=E.AZUL2,
+            activeforeground=E.TEXTO_BLANCO,
             padx=14, pady=6, command=self._refrescar_manual)
         self.btn_refrescar.pack(side="right")
 
-        self.lbl_contador = tk.Label(barra, text="", bg=E.FONDO,
-                                     fg=E.TEXTO_SUB, font=E.F_NORMAL_B)
-        self.lbl_contador.pack(side="right", padx=(0, 16))
+        self.lbl_contador = tk.Label(
+            self.barra_filtros, text="", bg=E.FONDO,
+            fg=E.TEXTO_SUB, font=E.F_NORMAL_B)
+        self.lbl_contador.pack(side="right", padx=(0, 12))
 
-        # ----- Tabla -----
-        marco_tabla = tk.Frame(self.cont, bg=E.BORDE, bd=0)
-        marco_tabla.pack(fill="both", expand=True)
-
+        # Estilo compartido del Treeview
         estilo = ttk.Style()
         try:
             estilo.theme_use("clam")
@@ -166,41 +222,176 @@ class ModuloInventario:
         estilo.configure("MPS.Treeview.Heading", background=E.AZUL,
                          foreground=E.TEXTO_BLANCO, font=E.F_NORMAL_B,
                          relief="flat", padding=(4, 6))
-        estilo.map("MPS.Treeview.Heading", background=[("active", E.AZUL2)])
+        estilo.map("MPS.Treeview.Heading",
+                   background=[("active", E.AZUL2)])
         estilo.map("MPS.Treeview",
                    background=[("selected", E.AZUL2)],
                    foreground=[("selected", E.TEXTO_BLANCO)])
         estilo.configure("MPS.Horizontal.TProgressbar",
                          troughcolor=E.FILA_IMPAR, bordercolor=E.BORDE_SUAVE,
-                         background=E.AZUL, lightcolor=E.AZUL, darkcolor=E.AZUL)
+                         background=E.AZUL, lightcolor=E.AZUL,
+                         darkcolor=E.AZUL)
 
-        ids = [c[0] for c in COLUMNAS]
-        self.tree = ttk.Treeview(marco_tabla, columns=ids, show="headings",
-                                 style="MPS.Treeview", selectmode="browse")
+        # ----- TABLA DE MARCAS -----
+        self.marco_marcas = tk.Frame(self.cont, bg=E.BORDE, bd=0)
+        ids_m = [c[0] for c in COLS_MARCA]
+        self.tree_marcas = ttk.Treeview(
+            self.marco_marcas, columns=ids_m, show="headings",
+            style="MPS.Treeview", selectmode="browse")
+        for cid, titulo, ancho, anchor in COLS_MARCA:
+            self.tree_marcas.heading(cid, text=titulo,
+                                     command=lambda c=cid: self._ordenar_marcas(c))
+            self.tree_marcas.column(cid, width=ancho, anchor=anchor,
+                                    stretch=(cid == "marca"))
+        self.tree_marcas.tag_configure("par",   background=E.FILA_PAR)
+        self.tree_marcas.tag_configure("impar", background=E.FILA_IMPAR)
+        self.tree_marcas.bind("<Double-1>", self._abrir_marca)
+        vsb_m = ttk.Scrollbar(self.marco_marcas, orient="vertical",
+                               command=self.tree_marcas.yview)
+        self.tree_marcas.configure(yscrollcommand=vsb_m.set)
+        self.tree_marcas.grid(row=0, column=0, sticky="nsew")
+        vsb_m.grid(row=0, column=1, sticky="ns")
+        self.marco_marcas.rowconfigure(0, weight=1)
+        self.marco_marcas.columnconfigure(0, weight=1)
+        self._orden_marca_col = "valor"
+        self._orden_marca_asc = False
+
+        # Nota debajo de la tabla de marcas
+        self.lbl_hint = tk.Label(
+            self.cont,
+            text="Doble clic en una marca para ver sus productos",
+            bg=E.FONDO, fg=E.TEXTO_TENUE, font=E.F_PEQUENA)
+
+        # ----- TABLA DE PRODUCTOS -----
+        self.marco_tabla = tk.Frame(self.cont, bg=E.BORDE, bd=0)
+        ids_p = [c[0] for c in COLUMNAS]
+        self.tree = ttk.Treeview(
+            self.marco_tabla, columns=ids_p, show="headings",
+            style="MPS.Treeview", selectmode="browse")
         for cid, titulo, ancho, anchor in COLUMNAS:
             self.tree.heading(cid, text=titulo,
                               command=lambda c=cid: self._ordenar(c))
             self.tree.column(cid, width=ancho, anchor=anchor,
                              stretch=(cid == "nombre"))
-        self.tree.tag_configure("par", background=E.FILA_PAR)
+        self.tree.tag_configure("par",   background=E.FILA_PAR)
         self.tree.tag_configure("impar", background=E.FILA_IMPAR)
         self.tree.bind("<Double-1>", self._abrir_detalle)
-
-        vsb = ttk.Scrollbar(marco_tabla, orient="vertical",
+        vsb = ttk.Scrollbar(self.marco_tabla, orient="vertical",
                             command=self.tree.yview)
-        hsb = ttk.Scrollbar(marco_tabla, orient="horizontal",
+        hsb = ttk.Scrollbar(self.marco_tabla, orient="horizontal",
                             command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
-        marco_tabla.rowconfigure(0, weight=1)
-        marco_tabla.columnconfigure(0, weight=1)
+        self.marco_tabla.rowconfigure(0, weight=1)
+        self.marco_tabla.columnconfigure(0, weight=1)
 
         self._construir_overlay()
+        self._mostrar_vista_marcas()
 
+    # ------------------------------------------------------------------
+    # NAVEGACION ENTRE VISTAS
+    # ------------------------------------------------------------------
+    def _mostrar_vista_marcas(self):
+        self._vista = "marcas"
+        self._marca_activa = None
+        self.barra_filtros.pack_forget()
+        self.btn_volver.pack_forget()
+        self.marco_tabla.pack_forget()
+        self.lbl_nav.config(text="Resumen por marca")
+        self.marco_marcas.pack(fill="both", expand=True, pady=(6, 0))
+        self.lbl_hint.pack(anchor="w", pady=(4, 0))
+        self._pintar_marcas()
+        self._actualizar_kpis_marcas()
+
+    def _abrir_marca(self, event=None):
+        item = self.tree_marcas.identify_row(event.y)
+        if not item:
+            return
+        idx = self.tree_marcas.index(item)
+        datos = self._resumen_filas
+        if not (0 <= idx < len(datos)):
+            return
+        marca = datos[idx]["marca"]
+        self._mostrar_vista_productos(marca)
+
+    def _mostrar_vista_productos(self, marca=None):
+        self._vista = "productos"
+        self._marca_activa = marca
+        self.marco_marcas.pack_forget()
+        self.lbl_hint.pack_forget()
+        if marca:
+            self.lbl_nav.config(text="Marca: " + marca)
+            self.btn_volver.pack(side="left", padx=(12, 0))
+        else:
+            self.lbl_nav.config(text="Todos los productos")
+            self.btn_volver.pack_forget()
+        self.barra_filtros.pack(fill="x", pady=(6, 6))
+        self.marco_tabla.pack(fill="both", expand=True)
+        self._aplicar_filtros()
+
+    def _volver_marcas(self):
+        self.var_busqueda.set("")
+        self.var_bodega.set("Todas")
+        self._mostrar_vista_marcas()
+
+    # ------------------------------------------------------------------
+    # TABLA DE MARCAS
+    # ------------------------------------------------------------------
+    def _pintar_marcas(self):
+        filas_con_stock = [f for f in self.filas if f["stock"] > 0]
+        datos = _resumen_marcas(filas_con_stock)
+        # Ordenar
+        col = self._orden_marca_col
+        num = col in ("productos", "unidades", "valor", "rent_prom", "rotacion")
+        datos = sorted(
+            datos,
+            key=lambda d: (d.get(col) is None,
+                           d.get(col, 0) if num else str(d.get(col, "")).lower()),
+            reverse=not self._orden_marca_asc)
+        self._resumen_filas = datos
+        try:
+            self.tree_marcas.delete(*self.tree_marcas.get_children())
+            for i, d in enumerate(datos):
+                rent = ("N/D" if d["rent_prom"] is None
+                        else "{:.1f}%".format(d["rent_prom"]))
+                rot  = ("-" if d["rotacion"] is None
+                        else "{:.2f}".format(d["rotacion"]))
+                tag = "par" if i % 2 == 0 else "impar"
+                self.tree_marcas.insert("", "end", tags=(tag,), values=(
+                    d["marca"], _miles(d["productos"]),
+                    _miles(d["unidades"]), _money(d["valor"]),
+                    rent, rot))
+        except tk.TclError:
+            pass
+
+    def _ordenar_marcas(self, col):
+        if self._orden_marca_col == col:
+            self._orden_marca_asc = not self._orden_marca_asc
+        else:
+            self._orden_marca_col = col
+            self._orden_marca_asc = False
+        self._pintar_marcas()
+
+    def _actualizar_kpis_marcas(self):
+        """KPIs globales en la vista de marcas."""
+        filas_stock = [f for f in self.filas if f["stock"] > 0]
+        k = ID.calcular_kpis(filas_stock)
+        try:
+            self.kpi["productos"]["valor"].config(text=_miles(k["productos"]))
+            self.kpi["unidades"]["valor"].config(text=_miles(k["unidades"]))
+            self.kpi["valor"]["valor"].config(text=_money(k["valor_costo"]))
+            self.kpi["pocas"]["valor"].config(text=_miles(self._contar_pocas()))
+        except tk.TclError:
+            pass
+
+    # ------------------------------------------------------------------
+    # KPI / TARJETAS
+    # ------------------------------------------------------------------
     def _tarjeta_kpi(self, padre, titulo, color):
-        marco = tk.Frame(padre, bg=E.BLANCO, highlightbackground=E.BORDE_SUAVE,
+        marco = tk.Frame(padre, bg=E.BLANCO,
+                         highlightbackground=E.BORDE_SUAVE,
                          highlightthickness=1, bd=0)
         tk.Frame(marco, bg=color, height=5).pack(fill="x")
         cuerpo = tk.Frame(marco, bg=E.BLANCO)
@@ -213,7 +404,7 @@ class ModuloInventario:
         return {"marco": marco, "valor": val}
 
     # ------------------------------------------------------------------
-    # Overlay de carga (primera vez)
+    # OVERLAY
     # ------------------------------------------------------------------
     def _construir_overlay(self):
         self.overlay = tk.Frame(self.cont, bg=E.FONDO)
@@ -233,7 +424,11 @@ class ModuloInventario:
         self.ov_bar.pack(padx=48, pady=(14, 6))
         self.ov_pct = tk.Label(tarjeta, text="0%", bg=E.BLANCO,
                                fg=E.AZUL, font=E.F_NORMAL_B)
-        self.ov_pct.pack(pady=(0, 28))
+        self.ov_pct.pack()
+        tk.Label(tarjeta,
+                 text="La lectura de movimientos puede tardar 20-40 segundos.",
+                 bg=E.BLANCO, fg=E.TEXTO_TENUE,
+                 font=(E.FUENTE, 8, "italic")).pack(pady=(4, 28))
 
     def _mostrar_overlay(self):
         self.overlay.place(x=0, y=0, relwidth=1, relheight=1)
@@ -260,13 +455,13 @@ class ModuloInventario:
             pass
 
     # ------------------------------------------------------------------
-    # Callbacks del almacen
+    # CALLBACKS DEL ALMACEN
     # ------------------------------------------------------------------
     def _on_prog(self, pct, msg):
         if not self._vivo:
             return
-        # Porcentaje arriba a la derecha (siempre, aunque cargue por detras)
-        self._set_indicador("Cargando inventario... {}%".format(int(pct)), True)
+        self._set_indicador(
+            "Cargando inventario... {}%".format(int(pct)), True)
         if self._overlay_visible():
             self._actualizar_overlay(pct, msg)
 
@@ -277,7 +472,6 @@ class ModuloInventario:
             self.btn_refrescar.config(state="normal", text="Actualizar ahora")
         except tk.TclError:
             pass
-
         if not info.get("ok"):
             self._set_indicador("Sin conexion (se reintentara)", False)
             if manual:
@@ -287,7 +481,6 @@ class ModuloInventario:
             if not store.hay_datos():
                 self._actualizar_overlay(100, "Sin conexion con Business")
             return
-
         self._ocultar_overlay()
         self._render(info)
         self._indicador_actualizado(resumen)
@@ -305,11 +498,12 @@ class ModuloInventario:
         self.bodegas = info.get("bodegas", {})
         self._llenar_combo_bodegas()
         self._recalc_rotacion()
-        self._aplicar_filtros(conservar_scroll=True)
+        if self._vista == "marcas":
+            self._mostrar_vista_marcas()
+        else:
+            self._aplicar_filtros(conservar_scroll=True)
 
     def _recalc_rotacion(self):
-        """Recalcula la rotacion de cada producto segun el periodo elegido,
-        con la misma formula del modulo Rentabilidad y Rotacion."""
         info = store.obtener() or {}
         movs = info.get("movimientos", [])
         desde, hasta = VD.rango_periodo(self.var_periodo.get())
@@ -319,7 +513,10 @@ class ModuloInventario:
 
     def _cambiar_periodo(self):
         self._recalc_rotacion()
-        self._aplicar_filtros()
+        if self._vista == "marcas":
+            self._pintar_marcas()
+        else:
+            self._aplicar_filtros()
 
     def _indicador_actualizado(self, resumen):
         if store.ultima_carga is not None:
@@ -353,8 +550,13 @@ class ModuloInventario:
     def _aplicar_filtros(self, conservar_scroll=False):
         if not self._vivo:
             return
+        filas_base = self.filas
+        # Si hay marca activa, filtrar solo esa marca
+        if self._marca_activa:
+            filas_base = [f for f in filas_base
+                          if (f["marca"] or "(Sin marca)") == self._marca_activa]
         filtradas = ID.filtrar(
-            self.filas,
+            filas_base,
             texto=self.var_busqueda.get(),
             bodega_cod=self._bodega_cod_actual(),
             solo_con_stock=self.var_stock.get())
@@ -393,8 +595,6 @@ class ModuloInventario:
         return v if v not in (None, "") else ""
 
     def _pintar_tabla(self, conservar_scroll=False):
-        """Dibuja TODAS las filas filtradas. Si conservar_scroll, mantiene
-        la posicion del scroll (para que no salte en el refresco automatico)."""
         ids = [c[0] for c in COLUMNAS]
         try:
             pos = self.tree.yview()[0] if conservar_scroll else None
@@ -409,8 +609,6 @@ class ModuloInventario:
             pass
 
     def _contar_pocas(self):
-        """Conteo real del modulo Pocas Unidades (faltante>0 o stock<=umbral),
-        global, no depende del filtro de la tabla."""
         try:
             import proyeccion_datos as PY
             info = store.obtener() or {}
@@ -433,6 +631,9 @@ class ModuloInventario:
                 pass
         self._aplicar_filtros()
 
+    # ------------------------------------------------------------------
+    # DETALLE DE PRODUCTO (doble clic en tabla de productos)
+    # ------------------------------------------------------------------
     def _abrir_detalle(self, event):
         item = self.tree.identify_row(event.y)
         if not item:
@@ -457,12 +658,12 @@ class ModuloInventario:
         except tk.TclError:
             pass
 
-        # Encabezado azul
         hd = tk.Frame(dlg, bg=E.AZUL)
         hd.pack(fill="x")
         tk.Label(hd, text=fila["nombre"] or "(sin nombre)", bg=E.AZUL,
-                 fg=E.TEXTO_BLANCO, font=(E.FUENTE, 15, "bold")).pack(
-                     anchor="w", padx=18, pady=(12, 0))
+                 fg=E.TEXTO_BLANCO,
+                 font=(E.FUENTE, 15, "bold")).pack(anchor="w", padx=18,
+                                                   pady=(12, 0))
         tk.Label(hd, text="Codigo: " + cod, bg=E.AZUL, fg="#CFE4F5",
                  font=(E.FUENTE, 10)).pack(anchor="w", padx=18, pady=(0, 12))
         tk.Frame(dlg, bg=E.ROJO, height=3).pack(fill="x")
@@ -470,21 +671,21 @@ class ModuloInventario:
         cuerpo = tk.Frame(dlg, bg=E.FONDO)
         cuerpo.pack(fill="both", expand=True, padx=18, pady=16)
 
-        rent = "N/D" if fila["rent_pct"] is None else "{:.1f}%".format(
-            fila["rent_pct"])
-        rota = "-" if fila["rotacion"] is None else "{:.2f}".format(
-            fila["rotacion"])
+        rent = ("N/D" if fila["rent_pct"] is None
+                else "{:.1f}%".format(fila["rent_pct"]))
+        rota = ("-" if fila["rotacion"] is None
+                else "{:.2f}".format(fila["rotacion"]))
         datos = [
-            ("Marca", fila["marca"] or "-"),
-            ("Linea", fila["linea"] or "-"),
-            ("Sublinea", fila["tipo"] or "-"),
-            ("Referencia", fila["referencia"] or "-"),
-            ("Talla", fila["talla"] or "-"),
-            ("Color", fila["color"] or "-"),
+            ("Marca",          fila["marca"] or "-"),
+            ("Linea",          fila["linea"] or "-"),
+            ("Sublinea",       fila["tipo"]  or "-"),
+            ("Referencia",     fila["referencia"] or "-"),
+            ("Talla",          fila["talla"] or "-"),
+            ("Color",          fila["color"] or "-"),
             ("Costo unitario", _money(fila["costo_unit"])),
             ("Precio publico", _money(fila["precio_pub"])),
-            ("Rentabilidad", rent),
-            ("Rotacion", rota),
+            ("Rentabilidad",   rent),
+            ("Rotacion",       rota),
         ]
         grid = tk.Frame(cuerpo, bg=E.FONDO)
         grid.pack(fill="x")
@@ -495,18 +696,19 @@ class ModuloInventario:
                      font=E.F_PEQUENA).grid(row=r, column=cc, sticky="w",
                                             padx=(0, 6), pady=3)
             tk.Label(grid, text=str(v), bg=E.FONDO, fg=E.TEXTO,
-                     font=E.F_NORMAL_B).grid(row=r, column=cc + 1, sticky="w",
-                                             padx=(0, 30), pady=3)
+                     font=E.F_NORMAL_B).grid(row=r, column=cc + 1,
+                                             sticky="w", padx=(0, 30), pady=3)
 
-        tk.Label(cuerpo, text="Existencias por bodega", bg=E.FONDO, fg=E.AZUL,
-                 font=E.F_NORMAL_B).pack(anchor="w", pady=(16, 4))
+        tk.Label(cuerpo, text="Existencias por bodega", bg=E.FONDO,
+                 fg=E.AZUL, font=E.F_NORMAL_B).pack(anchor="w", pady=(16, 4))
         tabla = tk.Frame(cuerpo, bg=E.BLANCO,
-                         highlightbackground=E.BORDE_SUAVE, highlightthickness=1)
+                         highlightbackground=E.BORDE_SUAVE,
+                         highlightthickness=1)
         tabla.pack(fill="x")
         enc = tk.Frame(tabla, bg=E.AZUL)
         enc.pack(fill="x")
         for txt, w, anch in [("Bodega", 22, "w"), ("Stock", 10, "e"),
-                             ("Valor", 16, "e")]:
+                              ("Valor", 16, "e")]:
             tk.Label(enc, text=txt, bg=E.AZUL, fg=E.TEXTO_BLANCO,
                      font=E.F_PEQUENA, width=w, anchor=anch).pack(
                          side="left", padx=6, pady=4)
@@ -528,8 +730,8 @@ class ModuloInventario:
                      font=E.F_NORMAL, width=10, anchor="e").pack(
                          side="left", padx=6)
             tk.Label(rf, text=_money(f["valor_bodega"]), bg=E.BLANCO,
-                     fg=E.TEXTO, font=E.F_NORMAL, width=16, anchor="e").pack(
-                         side="left", padx=6)
+                     fg=E.TEXTO, font=E.F_NORMAL, width=16,
+                     anchor="e").pack(side="left", padx=6)
         if not hay:
             tk.Label(tabla, text="Sin existencias", bg=E.BLANCO,
                      fg=E.TEXTO_SUB, font=E.F_NORMAL).pack(padx=6, pady=4)
@@ -539,9 +741,11 @@ class ModuloInventario:
                  font=E.F_NORMAL_B, width=22, anchor="w").pack(
                      side="left", padx=6, pady=3)
         tk.Label(tf, text=_miles(tot_stock), bg=E.FILA_IMPAR, fg=E.TEXTO,
-                 font=E.F_NORMAL_B, width=10, anchor="e").pack(side="left", padx=6)
+                 font=E.F_NORMAL_B, width=10, anchor="e").pack(
+                     side="left", padx=6)
         tk.Label(tf, text=_money(tot_valor), bg=E.FILA_IMPAR, fg=E.TEXTO,
-                 font=E.F_NORMAL_B, width=16, anchor="e").pack(side="left", padx=6)
+                 font=E.F_NORMAL_B, width=16, anchor="e").pack(
+                     side="left", padx=6)
 
         tk.Button(cuerpo, text="Cerrar", bg=E.AZUL, fg=E.TEXTO_BLANCO,
                   font=E.F_NORMAL_B, relief="flat", bd=0, cursor="hand2",
@@ -574,13 +778,11 @@ class ModuloInventario:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
+    import os, sys
     DIR_UI = os.path.dirname(os.path.abspath(__file__))
     DIR_APP = os.path.dirname(DIR_UI)
     sys.path.insert(0, os.path.join(DIR_APP, "core"))
     sys.path.insert(0, DIR_UI)
-
     root = tk.Tk()
     root.state("zoomed")
     root.configure(bg=E.FONDO)

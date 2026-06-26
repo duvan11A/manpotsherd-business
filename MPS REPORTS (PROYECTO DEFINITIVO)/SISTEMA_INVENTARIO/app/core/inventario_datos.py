@@ -157,7 +157,7 @@ def obtener_inventario(empresa="FUTURE COMPANY", progreso=None):
     base = {"ok": False, "datos": None, "filas": [], "bodegas": {},
             "firma": "", "ano": ano_activo(), "error": None}
 
-    prog(4, "Conectando con Business")
+    prog(4, "Conectando con Business...")
     datos = business_reader.detectar_ruta(empresa)
     if not datos:
         base["error"] = "Sin conexion a Business."
@@ -165,28 +165,33 @@ def obtener_inventario(empresa="FUTURE COMPANY", progreso=None):
         return base
 
     try:
-        prog(12, "Leyendo productos")
+        prog(12, "Leyendo catalogo de productos...")
         productos = business_reader.leer_productos(datos)
-        prog(35, "Leyendo bodegas")
+        prog(20, "Leyendo bodegas y ubicaciones...")
         bodegas = business_reader.leer_bodegas(datos)
 
         def mov_prog(hechos, total):
             pct = 40 + int(33 * hechos / total) if total else 73
-            prog(pct, "Leyendo movimientos ({}/{})".format(hechos, total))
+            if total:
+                prog(pct, "Leyendo movimientos {} de {} - por favor espere...".format(
+                    hechos, total))
+            else:
+                prog(pct, "Leyendo historial de movimientos...")
 
+        prog(35, "Leyendo movimientos del ano (esto puede tomar unos segundos)...")
         movimientos = business_reader.leer_movimientos(
             datos, base["ano"], progreso=mov_prog)
-        prog(78, "Calculando existencias")
+        prog(78, "Calculando existencias y rentabilidad...")
         stock = calculos.inventario_sumadirecta(movimientos)
         rotacion = calcular_rotacion(movimientos)
-        prog(88, "Resolviendo marcas y lineas")
+        prog(88, "Resolviendo marcas y lineas...")
         cat = catalogos.Catalogos(datos)
     except Exception as e:
         base["error"] = "Error leyendo Business: " + str(e)
         prog(100, "Error")
         return base
 
-    prog(92, "Armando inventario")
+    prog(92, "Armando tabla de inventario...")
     filas = []
     for (codigo, bod_cod), st in stock.items():
         p = productos.get(codigo, {})
