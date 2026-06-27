@@ -25,6 +25,11 @@ from pathlib import Path
 import business_reader
 import calculos
 import catalogos
+try:
+    import produccion_datos as _PD
+    _TIENE_EXTERNO = True
+except Exception:
+    _TIENE_EXTERNO = False
 
 UMBRAL_POR_DEFECTO = 20
 ANO_POR_DEFECTO = 2026
@@ -192,20 +197,40 @@ def obtener_inventario(empresa="FUTURE COMPANY", progreso=None):
         return base
 
     prog(92, "Armando tabla de inventario...")
+
+    # Cache del programa externo para completar productos sin datos en Business
+    _cache_ext = {}
+    if _TIENE_EXTERNO:
+        try:
+            _cache_ext = _PD._info_externos() or {}
+        except Exception:
+            _cache_ext = {}
+
     filas = []
     for (codigo, bod_cod), st in stock.items():
         p = productos.get(codigo, {})
         costo = float(p.get("COSTO_REP", 0) or 0)
         precio = float(p.get("PVTA1I", 0) or 0)
-        marca = p.get("MARCA", "")
-        linea = p.get("LINEA", "")
-        sublinea = p.get("SUBLINEA", "")
-        subgrupo = p.get("SUBGRUPO", "")
+        nombre = p.get("NOMBRE", "") or ""
+        marca  = p.get("MARCA",  "") or ""
+        linea  = p.get("LINEA",  "") or ""
+        sublinea = p.get("SUBLINEA", "") or ""
+        subgrupo = p.get("SUBGRUPO", "") or ""
+
+        # Si el producto esta incompleto en Business, completar con externo
+        if _cache_ext and (not nombre or not marca or costo == 0):
+            ext = _cache_ext.get(codigo)
+            if ext:
+                if not nombre:
+                    nombre = ext.get("nombre", "") or nombre
+                if not marca:
+                    marca = ext.get("marca", "") or marca
+
         et = cat.resolver(marca, linea, sublinea, subgrupo)
         filas.append({
             "codigo": codigo,
             "referencia": p.get("REFER", ""),
-            "nombre": p.get("NOMBRE", ""),
+            "nombre": nombre,
             "talla": p.get("TALLA", ""),
             "color": p.get("TCOLOR", ""),
             "bodega_cod": bod_cod,
@@ -220,7 +245,7 @@ def obtener_inventario(empresa="FUTURE COMPANY", progreso=None):
             "linea": et["linea"],
             "sublinea": et["sublinea"],
             "subgrupo": et["subgrupo"],
-            "tipo": _primera_palabra(p.get("NOMBRE", "")),
+            "tipo": _primera_palabra(nombre),
         })
 
     base.update({"ok": True, "datos": datos, "filas": filas,

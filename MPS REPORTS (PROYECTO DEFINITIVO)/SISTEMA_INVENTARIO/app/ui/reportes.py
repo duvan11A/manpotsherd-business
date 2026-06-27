@@ -254,6 +254,86 @@ def _resumen_ejecutivo(info, empresa, usuario, desde_iso, hasta_iso, meses):
     return cols, filas
 
 
+
+def _datos_por_marca(info, desde_iso, hasta_iso):
+    """Resumen consolidado por marca: inventario + ventas + rentabilidad."""
+    filas_inv   = info.get("filas", [])
+    movimientos = info.get("movimientos", [])
+    productos   = info.get("productos", {})
+
+    # Mapa codigo -> marca etiquetada (ya resuelta en filas de inventario)
+    marca_por_cod = {}
+    for f in filas_inv:
+        if f.get("codigo") and f.get("marca"):
+            marca_por_cod[f["codigo"]] = f["marca"]
+
+    # Stock e inventario por marca
+    marcas = {}
+    for f in filas_inv:
+        m = marca_por_cod.get(f["codigo"]) or "(Sin marca)"
+        if m not in marcas:
+            marcas[m] = {"productos": set(), "unidades": 0.0,
+                         "valor_inv": 0.0, "ventas_u": 0.0,
+                         "ventas_v": 0.0, "costo_v": 0.0}
+        d = marcas[m]
+        d["productos"].add(f["codigo"])
+        d["unidades"]  += f.get("stock", 0) or 0
+        d["valor_inv"] += f.get("valor_bodega", 0) or 0
+
+    # Ventas por marca
+    for m in movimientos:
+        if m.get("ES_VTA") != "S":
+            continue
+        f = m["FECHA"]
+        if f < desde_iso or f > hasta_iso:
+            continue
+        mov = m["MOV"]
+        signo = 1 if mov == "S" else (-1 if mov == "E" else 0)
+        if signo == 0:
+            continue
+        cod = m["CODIGO"]
+        marca = marca_por_cod.get(cod) or "(Sin marca)"
+        if marca not in marcas:
+            marcas[marca] = {"productos": set(), "unidades": 0.0,
+                             "valor_inv": 0.0, "ventas_u": 0.0,
+                             "ventas_v": 0.0, "costo_v": 0.0}
+        marcas[marca]["productos"].add(cod)
+        marcas[marca]["ventas_u"] += signo * m["CANT"]
+        marcas[marca]["ventas_v"] += signo * m.get("VTAS", 0.0)
+        marcas[marca]["costo_v"]  += signo * m.get("COSTOT", 0.0)
+
+    # Total ventas para participacion
+    total_ventas = sum(d["ventas_v"] for d in marcas.values())
+    total_inv    = sum(d["valor_inv"] for d in marcas.values())
+
+    cols = ["Marca", "Productos", "Unidades stock", "Valor inventario",
+            "% Inventario", "Unidades vendidas", "Valor ventas",
+            "Costo ventas", "Utilidad", "Rentabilidad %", "% Participacion ventas"]
+    filas = []
+    for marca, d in sorted(marcas.items(),
+                            key=lambda x: -x[1]["ventas_v"]):
+        utilidad = d["ventas_v"] - d["costo_v"]
+        rent = ((d["ventas_v"] - d["costo_v"]) / d["ventas_v"] * 100
+                if d["ventas_v"] > 0 else 0)
+        part_v = (d["ventas_v"] / total_ventas * 100
+                  if total_ventas > 0 else 0)
+        part_i = (d["valor_inv"] / total_inv * 100
+                  if total_inv > 0 else 0)
+        filas.append([
+            marca,
+            _miles(len(d["productos"])),
+            _miles(d["unidades"]),
+            _money(d["valor_inv"]),
+            _pct(part_i),
+            _miles(d["ventas_u"]),
+            _money(d["ventas_v"]),
+            _money(d["costo_v"]),
+            _money(utilidad),
+            _pct(rent),
+            _pct(part_v),
+        ])
+    return cols, filas
+
 # ------------------------------------------------------------------
 # Pantalla
 # ------------------------------------------------------------------
@@ -408,8 +488,9 @@ class ModuloReportes:
         self.nb = ttk.Notebook(nb_frame)
         self.nb.pack(fill="both", expand=True)
         self._tabs = {}
-        tabs_def = ["Resumen", "Inventario", "Ventas", "Rentabilidad",
-                    "Proyeccion", "Pocas Unidades", "Produccion activa"]
+        tabs_def = ["Resumen", "Por Marca", "Inventario", "Ventas",
+                    "Rentabilidad", "Proyeccion", "Pocas Unidades",
+                    "Produccion activa"]
         for t in tabs_def:
             frame = tk.Frame(self.nb, bg=E.BLANCO)
             self.nb.add(frame, text=t)
@@ -453,15 +534,16 @@ class ModuloReportes:
 
         # Calcular datos de cada pestaña
         datos = {
-            "Resumen":          _resumen_ejecutivo(info, self.empresa,
-                                                   self.usuario, desde,
-                                                   hasta, meses),
-            "Inventario":       _datos_inventario(info),
-            "Ventas":           _datos_ventas(info, desde, hasta),
-            "Rentabilidad":     _datos_rentabilidad(info, desde, hasta),
-            "Proyeccion":       _datos_proyeccion(info, meses),
-            "Pocas Unidades":   _datos_pocas(info, meses,
-                                             PY.leer_umbral()),
+            "Resumen":           _resumen_ejecutivo(info, self.empresa,
+                                                    self.usuario, desde,
+                                                    hasta, meses),
+            "Por Marca":         _datos_por_marca(info, desde, hasta),
+            "Inventario":        _datos_inventario(info),
+            "Ventas":            _datos_ventas(info, desde, hasta),
+            "Rentabilidad":      _datos_rentabilidad(info, desde, hasta),
+            "Proyeccion":        _datos_proyeccion(info, meses),
+            "Pocas Unidades":    _datos_pocas(info, meses,
+                                              PY.leer_umbral()),
             "Produccion activa": _datos_produccion(),
         }
 
@@ -540,16 +622,18 @@ class ModuloReportes:
     def _construir_pestanas(self, info, desde, hasta, meses):
         """Devuelve lista de pestanas para exportar."""
         datos_tabs = [
-            ("Resumen",   "Resumen Ejecutivo",
+            ("Resumen",      "Resumen Ejecutivo",
              *_resumen_ejecutivo(info, self.empresa, self.usuario,
                                  desde, hasta, meses)),
-            ("Inventario", "Inventario",        *_datos_inventario(info)),
-            ("Ventas",     "Ventas del periodo", *_datos_ventas(info, desde, hasta)),
-            ("Rentabilidad","Rentabilidad",      *_datos_rentabilidad(info, desde, hasta)),
-            ("Proyeccion", "Proyeccion",         *_datos_proyeccion(info, meses)),
-            ("Pocas Unidades","Pocas Unidades",  *_datos_pocas(info, meses,
-                                                                PY.leer_umbral())),
-            ("Produccion","Produccion activa",   *_datos_produccion()),
+            ("Por Marca",    "Analisis por Marca",
+             *_datos_por_marca(info, desde, hasta)),
+            ("Inventario",   "Inventario",         *_datos_inventario(info)),
+            ("Ventas",       "Ventas del periodo",  *_datos_ventas(info, desde, hasta)),
+            ("Rentabilidad", "Rentabilidad",        *_datos_rentabilidad(info, desde, hasta)),
+            ("Proyeccion",   "Proyeccion",          *_datos_proyeccion(info, meses)),
+            ("Pocas Unidades","Pocas Unidades",     *_datos_pocas(info, meses,
+                                                                   PY.leer_umbral())),
+            ("Produccion",   "Produccion activa",   *_datos_produccion()),
         ]
         return [{"nombre": n, "modulo": m, "columnas": c, "filas": f}
                 for n, m, c, f in datos_tabs]

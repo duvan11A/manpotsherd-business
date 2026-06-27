@@ -154,7 +154,10 @@ def leer_movimientos(datos, ano=2026, progreso=None):
     for idx, archivo in enumerate(archivos):
         try:
             tabla = _abrir(str(archivo))
-            for r in tabla:
+            registros = list(tabla)          # carga en memoria una sola vez
+            total_reg = len(registros)
+            intervalo = max(1, total_reg // 20)  # reportar cada 5% del archivo
+            for i, r in enumerate(registros):
                 fecha = _fecha_a_texto(r.get("FECHA"))
                 if fecha < desde:
                     continue
@@ -171,8 +174,15 @@ def leer_movimientos(datos, ano=2026, progreso=None):
                     "ES_VTA": _txt(r.get("ES_VTA")).upper(),
                     "NUMERO": _txt(r.get("NUMERO")),
                 })
+                # Reportar progreso cada intervalo de registros
+                if progreso and total_reg > 0 and (i + 1) % intervalo == 0:
+                    try:
+                        # Simula avance parcial dentro del archivo actual
+                        parcial = (idx + (i + 1) / total_reg) / max(total, 1)
+                        progreso(int(parcial * total), total)
+                    except Exception:
+                        pass
         except Exception:
-            # Si un archivo movite esta danado, se omite sin frenar el resto
             pass
         if progreso:
             try:
